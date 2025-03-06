@@ -1,0 +1,4 @@
+url = "http://localhost:8080/user/register"
+request = "POST"
+header = "Content-Type: application/json"
+data = "{\"name\": \"John Doe\", \"email\": \"johndoe@example.com\", \"password\": \"securepassword123\"}"

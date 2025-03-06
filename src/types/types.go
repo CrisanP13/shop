@@ -1,0 +1,44 @@
+package types
+
+import (
+	"net/mail"
+	"strings"
+)
+
+type ErrorResp struct {
+	Error any `json:"error"`
+}
+
+func ErrorRespFromString(s string) ErrorResp {
+	return ErrorResp{Error: s}
+}
+
+type RegisterReq struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+func (r RegisterReq) Validate() map[string]string {
+	problems := map[string]string{}
+
+	if strings.TrimSpace(r.Name) == "" {
+		problems["name"] = "empty"
+	}
+
+	if strings.TrimSpace(r.Email) == "" {
+		problems["email"] = "empty"
+	} else if _, err := mail.ParseAddress(r.Email); err != nil {
+		problems["email"] = "invalid email"
+	}
+
+	if strings.TrimSpace(r.Password) == "" {
+		problems["password"] = "empty"
+	}
+
+	return problems
+}
+
+type RegiesterResp struct {
+	Id string `json:"id"`
+}
