@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/go-sql-driver/mysql"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crisanp13/shop/src/types"
 	"github.com/crisanp13/shop/src/util"
@@ -76,19 +77,25 @@ func createUserRegisterHandler(log *log.Logger,
 		var count int
 		err = db.QueryRow("select count(1) from users where email = ?", req.Email).Scan(&count)
 		if err != nil {
-			log.Println("failed failed query,", err)
+			log.Println("failed query,", err)
 			util.Encode(w, r, http.StatusInternalServerError,
 				types.ErrorRespFromString("internal server error"))
 		}
 		if count > 0 {
+			log.Println("email already in use,", req.Email)
 			util.Encode(w, r, http.StatusBadRequest,
 				types.ErrorResp{Error: "email already in use"})
 			return
 		}
 
-		// todo hash pass
+		pass, err := bcrypt.GenerateFromPassword([]byte(req.Password), 14)
+		if err != nil {
+			log.Println("failed to hash password,", err)
+			util.Encode(w, r, http.StatusInternalServerError,
+				types.ErrorRespFromString("internal server error"))
+		}
 		res, err := db.Exec("insert into users (name, email, password) values (?, ?, ?)",
-			req.Name, req.Email, req.Password)
+			req.Name, req.Email, pass)
 		if err != nil {
 			log.Printf("failed to create user %+v, %s", req, err)
 			util.Encode(w, r, http.StatusInternalServerError,
@@ -104,28 +111,6 @@ func createUserRegisterHandler(log *log.Logger,
 		util.Encode(w, r, http.StatusCreated,
 			types.RegiesterResp{Id: fmt.Sprint(id)})
 	}
-}
-
-func handleUserRegister(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	req, problems, err := util.Decode[types.RegisterReq](r)
-	if err != nil {
-		if len(problems) > 0 {
-			util.Encode(w, r, http.StatusBadRequest,
-				types.ErrorResp{Error: problems})
-			return
-		}
-		util.Encode(w, r, http.StatusBadRequest,
-			types.ErrorResp{Error: "failed to decode json"})
-		return
-	}
-
-	log.Default().Printf("%+v", req)
-
-	util.Encode(w, r, http.StatusCreated,
-		types.RegiesterResp{Id: "1234"})
 }
 
 func handleHealthcheck(
