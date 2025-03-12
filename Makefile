@@ -4,10 +4,8 @@ build:
 run:
 	go run src/main.go
 
-test: build
+test: migrate-down migrate
 	go test -v ./test
-
-test-full: migrate-down migrate clean test
 
 .PHONY: test
 

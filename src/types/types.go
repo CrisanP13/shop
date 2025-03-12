@@ -42,3 +42,25 @@ func (r RegisterReq) Validate() map[string]string {
 type RegiesterResp struct {
 	Id string `json:"id"`
 }
+
+type LoginReq struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+func (r LoginReq) Validate() map[string]string {
+	problems := map[string]string{}
+
+	if strings.TrimSpace(r.Email) == "" {
+		problems["email"] = "empty"
+	}
+	if strings.TrimSpace(r.Password) == "" {
+		problems["password"] = "empty"
+	}
+
+	return problems
+}
+
+type LoginResp struct {
+	Token string `json:"token"`
+}

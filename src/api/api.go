@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crisanp13/shop/src/types"
@@ -27,7 +29,8 @@ func Run(log *log.Logger,
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealthcheck)
-	mux.HandleFunc("/user/register", createUserRegisterHandler(log, db))
+	mux.HandleFunc("POST /user/register", createUserRegisterHandler(log, db))
+	mux.HandleFunc("POST /user/login", createUserLoginHandler(log, db))
 	log.Println("starting on", port)
 	err = http.ListenAndServe(port, mux)
 	if err != nil {
@@ -62,6 +65,7 @@ func createUserRegisterHandler(log *log.Logger,
 		w http.ResponseWriter,
 		r *http.Request,
 	) {
+		log.Println("received register")
 		req, problems, err := util.Decode[types.RegisterReq](r)
 		if err != nil {
 			if len(problems) > 0 {
@@ -70,7 +74,7 @@ func createUserRegisterHandler(log *log.Logger,
 				return
 			}
 			util.Encode(w, r, http.StatusBadRequest,
-				types.ErrorResp{Error: "failed to decode json"})
+				types.ErrorRespFromString("failed to decode json"))
 			return
 		}
 
@@ -84,7 +88,7 @@ func createUserRegisterHandler(log *log.Logger,
 		if count > 0 {
 			log.Println("email already in use,", req.Email)
 			util.Encode(w, r, http.StatusBadRequest,
-				types.ErrorResp{Error: "email already in use"})
+				types.ErrorRespFromString("email already in use"))
 			return
 		}
 
@@ -110,6 +114,61 @@ func createUserRegisterHandler(log *log.Logger,
 
 		util.Encode(w, r, http.StatusCreated,
 			types.RegiesterResp{Id: fmt.Sprint(id)})
+	}
+}
+
+func createUserLoginHandler(log *log.Logger,
+	db *sql.DB,
+) func(http.ResponseWriter, *http.Request) {
+	return func(
+		w http.ResponseWriter,
+		r *http.Request,
+	) {
+		log.Println("received login")
+		req, problems, err := util.Decode[types.LoginReq](r)
+
+		if err != nil {
+			if len(problems) > 0 {
+				util.Encode(w, r, http.StatusBadRequest,
+					types.ErrorResp{Error: problems})
+				return
+			}
+			util.Encode(w, r, http.StatusBadRequest,
+				types.ErrorResp{Error: "failed to decode json"})
+			return
+		}
+
+		var password []byte
+		var id int
+		row := db.QueryRow("select id, password from users where email = ?", req.Email)
+		if err = row.Scan(&id, &password); err != nil {
+			log.Println("failed login query,", err)
+			util.Encode(w, r, http.StatusBadRequest,
+				types.ErrorRespFromString("internal server error"))
+			return
+		}
+		err = bcrypt.CompareHashAndPassword(password, []byte(req.Password))
+		if err != nil {
+			util.Encode(w, r, http.StatusNotFound,
+				types.ErrorRespFromString("user not found"))
+			return
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256,
+			jwt.MapClaims{
+				"id":  id,
+				"exp": time.Now().Add(time.Hour * 24).Unix(),
+			})
+		tokenString, err := token.SignedString([]byte("zecret"))
+		if err != nil {
+			log.Println("failed to generate token,", err)
+			util.Encode(w, r, http.StatusInternalServerError,
+				types.ErrorRespFromString("internal server error"))
+			return
+		}
+
+		util.Encode(w, r, http.StatusOK,
+			types.LoginResp{Token: "Bearer: " + tokenString})
 	}
 }
 

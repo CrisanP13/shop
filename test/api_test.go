@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,45 +58,83 @@ func TestRegister(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = json.NewEncoder(&buf).Encode(
-		types.RegisterReq{
-			Name:     "Jim Jomson",
-			Email:    "jimjimson@gmail.com",
-			Password: "Pass1!",
-		})
+	registerReq := types.RegisterReq{
+		Name:     "Jim Jomson",
+		Email:    "jimjimson@gmail.com",
+		Password: "Pass1!",
+	}
+	err = json.NewEncoder(&buf).Encode(registerReq)
 	if err != nil {
-		t.Fatal("failed to encode request,", err)
+		t.Fatal("failed to encode register req,", err)
 	}
 	req, err := http.NewRequest(http.MethodPost,
 		getEndpoint("user/register"),
 		&buf)
 	if err != nil {
-		t.Fatal("failed to create request:", err)
+		t.Fatal("failed to create register req:", err)
 	}
 	client := http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatal("failed to send request:", err)
+		t.Fatal("failed to send register req:", err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			t.Fatal("failed to read response body")
+			t.Fatal("failed to read register resp,", err)
 		}
-		t.Fatalf("did not receive OK, received: %d, with: %s",
+		t.Fatalf("did not receive OK on register, received: %d, with: %s",
 			resp.StatusCode,
 			string(body))
 	}
 	var registerResp types.RegiesterResp
 	err = json.NewDecoder(resp.Body).Decode(&registerResp)
 	if err != nil {
-		t.Fatal("failed to decode response")
+		t.Fatal("failed to decode register res")
 	}
 	if registerResp.Id == "" {
 		t.Fatal("id is empty")
 	}
-	t.Logf("Id: %s", registerResp.Id)
+	resp.Body.Close()
+
+	loginReq := types.LoginReq{
+		Email:    registerReq.Email,
+		Password: registerReq.Password,
+	}
+	buf.Reset()
+	err = json.NewEncoder(&buf).Encode(loginReq)
+	if err != nil {
+		t.Fatal("failed ot encode login req")
+	}
+	req, err = http.NewRequest(http.MethodPost,
+		getEndpoint("user/login"),
+		&buf)
+	if err != nil {
+		t.Fatal("failed to create login req:", err)
+	}
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal("failed to send login req,", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal("failed to read login resp,", err)
+		}
+		t.Fatalf("did not receive OK from loign, received: %d, with %s",
+			resp.StatusCode,
+			string(body))
+	}
+	var loginResp types.LoginResp
+	if err = json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+		t.Fatal("failed to decode login resp")
+	}
+	resp.Body.Close()
+
+	if len(loginResp.Token) == 0 ||
+		!strings.HasPrefix(loginResp.Token, "Bearer:") {
+		t.Fatal("invalid auth header:", loginResp.Token)
+	}
 }
 
 func createLog() *log.Logger {
