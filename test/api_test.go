@@ -31,39 +31,30 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		fmt.Println("failed to parse base url:", err)
 	}
-	os.Exit(m.Run())
-}
 
-func TestHealthCheck(t *testing.T) {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	logger := createLog()
-	go api.Run(logger, port, ctx)
-	err := waitForReady(ctx, time.Second, getEndpoint("health"))
+	defer cancel()
+	log := createInMemLog()
+	go api.Run(log, port, ctx)
+	err = waitForReady(ctx, time.Second, getEndpoint("health"))
 	if err != nil {
-		t.Error("wait for endpoint failed,", err.Error())
+		fmt.Println("failed to start server,", err.Error())
 	}
-	t.Log("running")
+
+	code := m.Run()
+
+	os.Exit(code)
 }
 
 func TestRegister(t *testing.T) {
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	go api.Run(log.Default(), port, ctx)
-	err := waitForReady(ctx, time.Second, getEndpoint("health"))
-	if err != nil {
-		t.Fatal("wait for endpoint failed,", err.Error())
-	}
-
 	var buf bytes.Buffer
 	registerReq := types.RegisterReq{
 		Name:     "Jim Jomson",
 		Email:    "jimjimson@gmail.com",
 		Password: "Pass1!",
 	}
-	err = json.NewEncoder(&buf).Encode(registerReq)
+	err := json.NewEncoder(&buf).Encode(registerReq)
 	if err != nil {
 		t.Fatal("failed to encode register req,", err)
 	}
@@ -137,7 +128,7 @@ func TestRegister(t *testing.T) {
 	}
 }
 
-func createLog() *log.Logger {
+func createInMemLog() *log.Logger {
 	var buf bytes.Buffer
 	return log.New(&buf, "", log.LstdFlags)
 }
