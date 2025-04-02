@@ -5,6 +5,7 @@ run:
 	go run src/main.go
 
 test: migrate-drop migrate
+	mysql -uroot -pqwer shop < ./test/demo-data.sql
 	go test -v ./test
 
 .PHONY: test
