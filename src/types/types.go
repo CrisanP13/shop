@@ -13,6 +13,8 @@ func ErrorRespFromString(s string) ErrorResp {
 	return ErrorResp{Error: s}
 }
 
+var InternalServerError = ErrorResp{Error: "internal server error"}
+
 type RegisterReq struct {
 	Name     string `json:"name"`
 	Email    string `json:"email"`
@@ -62,5 +64,12 @@ func (r LoginReq) Validate() map[string]string {
 }
 
 type LoginResp struct {
+	Id    string `json:"id"`
 	Token string `json:"token"`
+}
+
+type User struct {
+	Id    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }

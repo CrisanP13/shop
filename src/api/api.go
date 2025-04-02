@@ -6,31 +6,40 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crisanp13/shop/src/encoding"
+	"github.com/crisanp13/shop/src/stores"
 	"github.com/crisanp13/shop/src/types"
-	"github.com/crisanp13/shop/src/util"
 )
+
+type IdContextKey string
+
+var idContextKey = IdContextKey("id")
+var privateKey = []byte("zecret")
 
 func Run(log *log.Logger,
 	port string,
 	ctx context.Context) error {
 	var db *sql.DB
-	db, err := createDB()
-	_ = db
+	db, err := creteDb()
 	if err != nil {
 		return fmt.Errorf("failed to create db, %w", err)
 	}
+	us := stores.NewMySqlUserStore(db)
 	log.Println("connected to db")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealthcheck)
-	mux.HandleFunc("POST /user/register", createUserRegisterHandler(log, db))
-	mux.HandleFunc("POST /user/login", createUserLoginHandler(log, db))
+	mux.HandleFunc("POST /user/register", createUserRegisterHandler(log, us))
+	mux.HandleFunc("POST /user/login", createUserLoginHandler(log, us))
+	mux.Handle("GET /user/details/{id}",
+		authorizationMiddleware(userDetailsHandler(log, us)))
 	log.Println("starting on", port)
 	err = http.ListenAndServe(port, mux)
 	if err != nil {
@@ -40,7 +49,7 @@ func Run(log *log.Logger,
 	return nil
 }
 
-func createDB() (*sql.DB, error) {
+func creteDb() (*sql.DB, error) {
 	cfg := mysql.NewConfig()
 	cfg.User = "root"
 	cfg.Passwd = "qwer"
@@ -58,123 +67,167 @@ func createDB() (*sql.DB, error) {
 	return db, nil
 }
 
+func handleHealthcheck(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	w.WriteHeader(http.StatusOK)
+}
+
 func createUserRegisterHandler(log *log.Logger,
-	db *sql.DB,
+	us stores.UserStore,
 ) func(http.ResponseWriter, *http.Request) {
 	return func(
 		w http.ResponseWriter,
 		r *http.Request,
 	) {
 		log.Println("received register")
-		req, problems, err := util.Decode[types.RegisterReq](r)
+		req, problems, err := encoding.Decode[types.RegisterReq](r)
 		if err != nil {
 			if len(problems) > 0 {
-				util.Encode(w, r, http.StatusBadRequest,
+				encoding.Encode(w, http.StatusBadRequest,
 					types.ErrorResp{Error: problems})
 				return
 			}
-			util.Encode(w, r, http.StatusBadRequest,
+			encoding.Encode(w, http.StatusBadRequest,
 				types.ErrorRespFromString("failed to decode json"))
 			return
 		}
 
-		var count int
-		err = db.QueryRow("select count(1) from users where email = ?", req.Email).Scan(&count)
+		exists, err := us.EmailExists(req.Email)
 		if err != nil {
-			log.Println("failed query,", err)
-			util.Encode(w, r, http.StatusInternalServerError,
-				types.ErrorRespFromString("internal server error"))
+			log.Println("failed email check,", err)
+			encoding.Encode(w, http.StatusInternalServerError,
+				types.InternalServerError)
+			return
 		}
-		if count > 0 {
+		if exists {
 			log.Println("email already in use,", req.Email)
-			util.Encode(w, r, http.StatusBadRequest,
+			encoding.Encode(w, http.StatusBadRequest,
 				types.ErrorRespFromString("email already in use"))
 			return
 		}
 
-		pass, err := bcrypt.GenerateFromPassword([]byte(req.Password), 14)
-		if err != nil {
-			log.Println("failed to hash password,", err)
-			util.Encode(w, r, http.StatusInternalServerError,
-				types.ErrorRespFromString("internal server error"))
-		}
-		res, err := db.Exec("insert into users (name, email, password) values (?, ?, ?)",
-			req.Name, req.Email, pass)
+		id, err := us.Create(&types.User{
+			Name:  req.Name,
+			Email: req.Email},
+			req.Password)
 		if err != nil {
 			log.Printf("failed to create user %+v, %s", req, err)
-			util.Encode(w, r, http.StatusInternalServerError,
-				types.ErrorRespFromString("internal server error"))
-		}
-		id, err := res.LastInsertId()
-		if err != nil {
-			log.Printf("failed to retrieve id of newly created user, %s", err)
-			util.Encode(w, r, http.StatusInternalServerError,
+			encoding.Encode(w, http.StatusInternalServerError,
 				types.ErrorRespFromString("internal server error"))
 		}
 
-		util.Encode(w, r, http.StatusCreated,
-			types.RegiesterResp{Id: fmt.Sprint(id)})
+		encoding.Encode(w, http.StatusCreated,
+			types.RegiesterResp{Id: id})
 	}
 }
 
 func createUserLoginHandler(log *log.Logger,
-	db *sql.DB,
+	us stores.UserStore,
 ) func(http.ResponseWriter, *http.Request) {
-	return func(
-		w http.ResponseWriter,
-		r *http.Request,
-	) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("received login")
-		req, problems, err := util.Decode[types.LoginReq](r)
+		req, problems, err := encoding.Decode[types.LoginReq](r)
 
 		if err != nil {
 			if len(problems) > 0 {
-				util.Encode(w, r, http.StatusBadRequest,
+				encoding.Encode(w, http.StatusBadRequest,
 					types.ErrorResp{Error: problems})
 				return
 			}
-			util.Encode(w, r, http.StatusBadRequest,
+			encoding.Encode(w, http.StatusBadRequest,
 				types.ErrorResp{Error: "failed to decode json"})
 			return
 		}
-
-		var password []byte
-		var id int
-		row := db.QueryRow("select id, password from users where email = ?", req.Email)
-		if err = row.Scan(&id, &password); err != nil {
-			log.Println("failed login query,", err)
-			util.Encode(w, r, http.StatusBadRequest,
-				types.ErrorRespFromString("internal server error"))
-			return
-		}
-		err = bcrypt.CompareHashAndPassword(password, []byte(req.Password))
+		id, pass, err := us.GetIdAndPassByEmail(req.Email)
 		if err != nil {
-			util.Encode(w, r, http.StatusNotFound,
-				types.ErrorRespFromString("user not found"))
+			log.Println("failed login query,", err)
+			encoding.EncodeInternalServerError(w)
 			return
 		}
-
+		if err != nil {
+			encoding.Encode(w, http.StatusNotFound,
+				types.ErrorRespFromString("user or password not found"))
+			return
+		}
+		err = bcrypt.CompareHashAndPassword(pass, []byte(req.Password))
+		if err != nil {
+			encoding.Encode(w, http.StatusNotFound,
+				types.ErrorRespFromString("user or password not found"))
+			return
+		}
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256,
 			jwt.MapClaims{
 				"id":  id,
 				"exp": time.Now().Add(time.Hour * 24).Unix(),
 			})
-		tokenString, err := token.SignedString([]byte("zecret"))
+		tokenString, err := token.SignedString(privateKey)
 		if err != nil {
 			log.Println("failed to generate token,", err)
-			util.Encode(w, r, http.StatusInternalServerError,
-				types.ErrorRespFromString("internal server error"))
+			encoding.EncodeInternalServerError(w)
 			return
 		}
-
-		util.Encode(w, r, http.StatusOK,
-			types.LoginResp{Token: "Bearer: " + tokenString})
+		encoding.Encode(w, http.StatusOK,
+			types.LoginResp{Token: "Bearer: " + tokenString,
+				Id: id})
 	}
 }
 
-func handleHealthcheck(
-	w http.ResponseWriter,
-	r *http.Request,
-) {
-	w.WriteHeader(http.StatusOK)
+func authorizationMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString := r.Header.Get("Authorization")
+		tokenString = strings.TrimPrefix(tokenString, "Bearer: ")
+		tokenString = strings.TrimSpace(tokenString)
+		if tokenString == "" {
+			encoding.Encode(w, http.StatusUnauthorized,
+				types.ErrorRespFromString("unauthorized"))
+			return
+		}
+		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+			return privateKey, nil
+		})
+		if err != nil {
+			log.Println("failed to parse token,", tokenString, err)
+			encoding.Encode(w, http.StatusUnauthorized,
+				types.ErrorRespFromString("unauthorized"))
+			return
+		}
+		if !token.Valid {
+			log.Println("invalid token", tokenString)
+			encoding.Encode(w, http.StatusUnauthorized,
+				types.ErrorRespFromString("unauthorized"))
+			return
+		}
+		claims := token.Claims.(jwt.MapClaims)
+		ctx := context.WithValue(r.Context(), idContextKey, claims["id"])
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func userDetailsHandler(log *log.Logger,
+	us stores.UserStore,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("received details")
+		id := r.PathValue("id")
+		idFromClaims := r.Context().Value(idContextKey)
+		log.Println(id)
+		log.Println(idFromClaims)
+		if id != idFromClaims {
+			encoding.Encode(w, http.StatusUnauthorized,
+				types.ErrorRespFromString("unauthorized"))
+			return
+		}
+		user, err := us.GetById(id)
+		if err != nil {
+			encoding.EncodeInternalServerError(w)
+			return
+		}
+		if user == nil {
+			encoding.Encode(w, http.StatusNotFound,
+				types.ErrorRespFromString("user not found"))
+		}
+		encoding.Encode(w, http.StatusOK, &user)
+	})
 }

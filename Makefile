@@ -4,7 +4,7 @@ build:
 run:
 	go run src/main.go
 
-test: migrate-down migrate
+test: migrate-drop migrate
 	go test -v ./test
 
 .PHONY: test
@@ -12,8 +12,8 @@ test: migrate-down migrate
 migrate:
 	migrate -source file://src/migrations/ -database "mysql://root:qwer@tcp(127.0.0.1:3306)/shop" up
 
-migrate-down:
-	migrate -source file://src/migrations/ -database "mysql://root:qwer@tcp(127.0.0.1:3306)/shop" down -all
+migrate-drop:
+	migrate -source file://src/migrations/ -database "mysql://root:qwer@tcp(127.0.0.1:3306)/shop" drop -f
 
 clean:
 	rm -r bin

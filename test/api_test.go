@@ -21,6 +21,7 @@ import (
 
 var baseUrl url.URL
 var port string
+var secret = "zecret"
 
 func TestMain(m *testing.M) {
 	flag.StringVar(&port, "port", "8080", "port to run server on")
@@ -31,20 +32,62 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		fmt.Println("failed to parse base url:", err)
 	}
-
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	log := createInMemLog()
-	go api.Run(log, port, ctx)
+	var buf bytes.Buffer
+	l := log.New(&buf, "", log.LstdFlags)
+	go api.Run(l, port, ctx)
 	err = waitForReady(ctx, time.Second, getEndpoint("health"))
 	if err != nil {
 		fmt.Println("failed to start server,", err.Error())
 	}
-
 	code := m.Run()
-
+	// fmt.Println(buf.String())
 	os.Exit(code)
+}
+
+func waitForReady(
+	ctx context.Context,
+	timeout time.Duration,
+	endpoint string,
+) error {
+	client := http.Client{}
+	startTime := time.Now()
+	for {
+		req, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			endpoint,
+			nil,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create request, %w", err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Println("error making request, ", err.Error())
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return nil
+		}
+		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if time.Since(startTime) >= timeout {
+				return fmt.Errorf("timeout reaced while waiting for endpoint")
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+}
+
+func getEndpoint(path string) string {
+	return baseUrl.JoinPath(path).String()
 }
 
 func TestRegister(t *testing.T) {
@@ -87,7 +130,6 @@ func TestRegister(t *testing.T) {
 		t.Fatal("id is empty")
 	}
 	resp.Body.Close()
-
 	loginReq := types.LoginReq{
 		Email:    registerReq.Email,
 		Password: registerReq.Password,
@@ -121,59 +163,58 @@ func TestRegister(t *testing.T) {
 		t.Fatal("failed to decode login resp")
 	}
 	resp.Body.Close()
-
 	if len(loginResp.Token) == 0 ||
 		!strings.HasPrefix(loginResp.Token, "Bearer:") {
 		t.Fatal("invalid auth header:", loginResp.Token)
 	}
 }
 
-func createInMemLog() *log.Logger {
+func TestAuthWithUserDetails(t *testing.T) {
+	loginReq := types.LoginReq{Email: "johnjohnson@gmail.com", Password: "Pass1!"}
 	var buf bytes.Buffer
-	return log.New(&buf, "", log.LstdFlags)
-}
-
-func getEndpoint(path string) string {
-	return baseUrl.JoinPath(path).String()
-}
-
-func waitForReady(
-	ctx context.Context,
-	timeout time.Duration,
-	endpoint string,
-) error {
+	err := json.NewEncoder(&buf).Encode(loginReq)
+	if err != nil {
+		t.Fatal("error encoding login req", err)
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		getEndpoint("user/login"),
+		&buf)
 	client := http.Client{}
-	startTime := time.Now()
-	for {
-		req, err := http.NewRequestWithContext(
-			ctx,
-			http.MethodGet,
-			endpoint,
-			nil,
-		)
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatal("failed login req", resp.StatusCode, err)
+	}
+	defer resp.Body.Close()
+	var loginResp types.LoginResp
+	err = json.NewDecoder(resp.Body).Decode(&loginResp)
+	if err != nil {
+		t.Fatal("failed to decode login resp", err)
+	}
+	req, err = http.NewRequest(http.MethodGet,
+		getEndpoint("user/details/"+loginResp.Id),
+		nil)
+	if err != nil {
+		t.Fatal("failed to make detail req", err)
+	}
+	req.Header.Add("Authorization", loginResp.Token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal("failed details req", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return fmt.Errorf("failed to create request, %w", err)
+			t.Fatal("failed to read login resp,", err)
 		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			fmt.Println("error making request, ", err.Error())
-			continue
-		}
-		if resp.StatusCode == http.StatusOK {
-			resp.Body.Close()
-			return nil
-		}
-		resp.Body.Close()
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if time.Since(startTime) >= timeout {
-				return fmt.Errorf("timeout reaced while waiting for endpoint")
-			}
-			time.Sleep(250 * time.Millisecond)
-		}
+		t.Fatal("failed details req,", resp.StatusCode, string(b))
+	}
+	var user types.User
+	err = json.NewDecoder(resp.Body).Decode(&user)
+	if err != nil {
+		t.Fatal("failed to decode user,", err)
+	}
+	if user.Id != loginResp.Id {
+		t.Errorf("user id differs, %s != %s", user.Id, loginResp.Id)
 	}
 }
