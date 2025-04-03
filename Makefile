@@ -7,7 +7,6 @@ run:
 test: migrate-drop migrate
 	mysql -uroot -pqwer shop < ./test/demo-data.sql
 	go test -v ./test
-
 .PHONY: test
 
 migrate:
@@ -17,4 +16,10 @@ migrate-drop:
 	migrate -source file://src/migrations/ -database "mysql://root:qwer@tcp(127.0.0.1:3306)/shop" drop -f
 
 clean:
-	rm -r bin
+	rm -r ./bin
+
+# set-env
+# set -a && . ./.env && set +a
+
+# clear-env
+# unset $(grep -v '^#' .env | sed -E 's/(.*)=.*/\1/' | xargs)
