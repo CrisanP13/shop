@@ -17,5 +17,4 @@ bin/
 go.work
 go.work.sum
 
-.env
 Session.vim
