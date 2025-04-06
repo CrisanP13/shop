@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -24,9 +23,7 @@ var port string
 var secret = "zecret"
 
 func TestMain(m *testing.M) {
-	flag.StringVar(&port, "port", "8080", "port to run server on")
-	flag.Parse()
-	port = ":" + port
+	port = ":" + getEnv("SHOP_PORT")
 	url, err := url.Parse("http://localhost" + port)
 	baseUrl = *url
 	if err != nil {
@@ -37,7 +34,7 @@ func TestMain(m *testing.M) {
 	defer cancel()
 	var buf bytes.Buffer
 	l := log.New(&buf, "", log.LstdFlags)
-	go api.Run(l, port, ctx)
+	go api.Run(ctx, getEnv, l)
 	err = waitForReady(ctx, time.Second, getEndpoint("health"))
 	if err != nil {
 		fmt.Println("failed to start server,", err.Error())
@@ -45,6 +42,18 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	// fmt.Println(buf.String())
 	os.Exit(code)
+}
+
+func getEnv(key string) string {
+	env := map[string]string{
+		"SHOP_PORT":    "8080",
+		"SHOP_DB_USER": "root",
+		"SHOP_DB_PASS": "qwer",
+		"SHOP_DB_NET":  "tcp",
+		"SHOP_DB_ADDR": "127.0.0.1:3306",
+		"SHOP_DB_NAME": "shop",
+	}
+	return env[key]
 }
 
 func waitForReady(

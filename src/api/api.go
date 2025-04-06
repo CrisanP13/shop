@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
@@ -23,11 +22,11 @@ type IdContextKey string
 var idContextKey = IdContextKey("id")
 var privateKey = []byte("zecret")
 
-func Run(log *log.Logger,
-	port string,
-	ctx context.Context) error {
+func Run(ctx context.Context,
+	getEnv func(string) string,
+	log *log.Logger) error {
 	var db *sql.DB
-	db, err := creteDb()
+	db, err := stores.CreateDb(getEnv)
 	if err != nil {
 		return fmt.Errorf("failed to create db, %w", err)
 	}
@@ -40,6 +39,7 @@ func Run(log *log.Logger,
 	mux.HandleFunc("POST /user/login", createUserLoginHandler(log, us))
 	mux.Handle("GET /user/details/{id}",
 		authorizationMiddleware(userDetailsHandler(log, us)))
+	port := ":" + getEnv("SHOP_PORT")
 	log.Println("starting on", port)
 	err = http.ListenAndServe(port, mux)
 	if err != nil {
@@ -47,24 +47,6 @@ func Run(log *log.Logger,
 	}
 
 	return nil
-}
-
-func creteDb() (*sql.DB, error) {
-	cfg := mysql.NewConfig()
-	cfg.User = "root"
-	cfg.Passwd = "qwer"
-	cfg.Net = "tcp"
-	cfg.Addr = "127.0.0.1:3306"
-	cfg.DBName = "shop"
-	db, err := sql.Open("mysql", cfg.FormatDSN())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open db, %w", err)
-	}
-	err = db.Ping()
-	if err != nil {
-		return nil, fmt.Errorf("failed to ping db, %w", err)
-	}
-	return db, nil
 }
 
 func handleHealthcheck(

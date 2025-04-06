@@ -6,8 +6,27 @@ import (
 	"strconv"
 
 	"github.com/crisanp13/shop/src/types"
+	"github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func CreateDb(getEnv func(string) string) (*sql.DB, error) {
+	cfg := mysql.NewConfig()
+	cfg.User = getEnv("SHOP_DB_USER")
+	cfg.Passwd = getEnv("SHOP_DB_PASS")
+	cfg.Net = getEnv("SHOP_DB_NET")
+	cfg.Addr = getEnv("SHOP_DB_ADDR")
+	cfg.DBName = getEnv("SHOP_DB_NAME")
+	db, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db, %w", err)
+	}
+	err = db.Ping()
+	if err != nil {
+		return nil, fmt.Errorf("failed to ping db, %w", err)
+	}
+	return db, nil
+}
 
 type UserStore interface {
 	EmailExists(string) (bool, error)
