@@ -10,20 +10,33 @@ run:
 	@go run src/main.go
 
 test: e2e-test
-	@echo Testing...
 
 E2E_PACKAGES :=	 ./test
 e2e-test: migrate-drop migrate add-demo-data build
 	@echo "Starting app..."
 	@bin/main > e2e.log 2>&1 & echo $$! > app.pid
-	@sleep 2 #wait for startup
+	@echo "Waiting for app..."
+	@retries=3; \
+	while [ $$retries -gt 0 ]; do \
+		if curl -s http://localhost:8080/health > /dev/null; then \
+			echo "App started"; \
+			break; \
+		fi; \
+		retries=$$((retries-1)); \
+		if [ $$retries -eq 0 ]; then \
+			echo "App failed to start in time"; \
+			kill `cat app.pid`; \
+			exit 1; \
+		fi; \
+		sleep 0.5; \
+	done
 
 	@EXIT_CODE=0; \
 	for pckg in $(E2E_PACKAGES); do \
 		echo "Running tests in $$pckg"; \
 		go test -v $$pckg || EXIT_CODE=$$?; \
 	done; \
-	@echo "Stopping app..."; \
+	echo "Stopping app..."; \
 	kill `cat app.pid`; \
 	wait `cat app.pid` 2>/dev/null || true; \
 	rm -f app.pid; \
