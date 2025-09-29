@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,44 +13,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crisanp13/shop/src/api"
 	"github.com/crisanp13/shop/src/types"
 )
 
 var baseUrl url.URL
-var port string
-var secret = "zecret"
 
 func TestMain(m *testing.M) {
-	port = ":" + getEnv("SHOP_PORT")
+	port := ":" + getEnv("SHOP_PORT")
 	url, err := url.Parse("http://localhost" + port)
 	baseUrl = *url
 	if err != nil {
 		fmt.Println("failed to parse base url:", err)
 	}
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var buf bytes.Buffer
-	l := log.New(&buf, "", log.LstdFlags)
-	go api.Run(ctx, getEnv, l)
-	err = waitForReady(ctx, time.Second, getEndpoint("health"))
-	if err != nil {
-		fmt.Println("failed to start server,", err.Error())
-	}
 	code := m.Run()
-	// fmt.Println(buf.String())
 	os.Exit(code)
 }
 
 func getEnv(key string) string {
 	env := map[string]string{
-		"SHOP_PORT":    "8080",
-		"SHOP_DB_USER": "root",
-		"SHOP_DB_PASS": "qwer",
-		"SHOP_DB_NET":  "tcp",
-		"SHOP_DB_ADDR": "127.0.0.1:3306",
-		"SHOP_DB_NAME": "shop",
+		"SHOP_PORT": "8080",
 	}
 	return env[key]
 }
@@ -188,6 +168,9 @@ func TestAuthWithUserDetails(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost,
 		getEndpoint("user/login"),
 		&buf)
+	if err != nil {
+		t.Fatal("failed to create login req", err)
+	}
 	client := http.Client{}
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {

@@ -126,9 +126,6 @@ func createUserLoginHandler(log *log.Logger,
 		if err != nil {
 			log.Println("failed login query,", err)
 			encoding.EncodeInternalServerError(w)
-			return
-		}
-		if err != nil {
 			encoding.Encode(w, http.StatusNotFound,
 				types.ErrorRespFromString("user or password not found"))
 			return
