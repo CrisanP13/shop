@@ -20,7 +20,7 @@ import (
 type IdContextKey string
 
 var idContextKey = IdContextKey("id")
-var privateKey = []byte("zecret")
+var privateKey []byte
 
 func Run(ctx context.Context,
 	getEnv func(string) string,
@@ -40,6 +40,7 @@ func Run(ctx context.Context,
 	mux.Handle("GET /user/details/{id}",
 		authorizationMiddleware(userDetailsHandler(log, us)))
 	port := ":" + getEnv("SHOP_PORT")
+	privateKey = []byte(getEnv("SHOP_AUTH_SECRET"))
 	log.Println("starting on", port)
 	err = http.ListenAndServe(port, mux)
 	if err != nil {

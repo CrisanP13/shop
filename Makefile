@@ -1,58 +1,57 @@
-include .env
+
 export $(shell sed -n 's/^\([^#]*\)=.*/\1/p' .env)
+
+.PHONY: build run test e2e-test migrate migrate-drop add-demo-data clean
 
 APP := bin/main
 
 build:
-	@go build -o $(APP) src/main.go
+	go build -o $(APP) src/main.go
 
 run:
-	@go run src/main.go
+	go run src/main.go
 
 test: e2e-test
 
 E2E_PACKAGES :=	 ./test
 e2e-test: migrate-drop migrate add-demo-data build
-	@echo "Starting app..."
-	@bin/main > e2e.log 2>&1 & echo $$! > app.pid
-	@echo "Waiting for app..."
-	@retries=3; \
-	while [ $$retries -gt 0 ]; do \
-		if curl -s http://localhost:8080/health > /dev/null; then \
-			echo "App started"; \
-			break; \
+	@echo "Starting app"
+	@( \
+	  $(APP) > e2e.log 2>&1 & \
+	  echo $$! > app.pid; \
+	  trap "echo 'Stopping app...'; kill \`cat app.pid\`; wait \`cat app.pid\` 2>/dev/null || true; rm -f app.pid" EXIT; \
+	  echo "Waiting for app"; \
+	  retries=5; \
+	  while [ $$retries -gt 0 ]; do \
+	  if curl -s $(SHOP_ADDR):$(SHOP_PORT)/health > /dev/null; then \
+		  echo "App started"; break; \
 		fi; \
 		retries=$$((retries-1)); \
-		if [ $$retries -eq 0 ]; then \
-			echo "App failed to start in time"; \
-			kill `cat app.pid`; \
-			exit 1; \
-		fi; \
+		[ $$retries -eq 0 ] && echo "App failed to start" && exit 1; \
 		sleep 0.5; \
-	done
-
-	@EXIT_CODE=0; \
-	for pckg in $(E2E_PACKAGES); do \
+	  done; \
+	  EXIT_CODE=0; \
+	  for pckg in $(E2E_PACKAGES); do \
 		echo "Running tests in $$pckg"; \
 		go test -v $$pckg || EXIT_CODE=$$?; \
-	done; \
-	echo "Stopping app..."; \
-	kill `cat app.pid`; \
-	wait `cat app.pid` 2>/dev/null || true; \
-	rm -f app.pid; \
-	exit $$EXIT_CODE
+	  done; \
+	  exit $$EXIT_CODE; \
+	)
 
 migrate:
-	@migrate -source file://src/migrations/ -database "mysql://root:qwer@tcp(127.0.0.1:3306)/shop" up
+	@echo "Migrating"
+	@migrate -source file://src/migrations/ -database "mysql://$$SHOP_DB_USER:$$SHOP_DB_PASS@tcp($$SHOP_DB_ADDR)/$$SHOP_DB_NAME" up
 
 migrate-drop:
-	@migrate -source file://src/migrations/ -database "mysql://root:qwer@tcp(127.0.0.1:3306)/shop" drop -f
+	@echo "Droping db"
+	@migrate -source file://src/migrations/ -database "mysql://$$SHOP_DB_USER:$$SHOP_DB_PASS@tcp($$SHOP_DB_ADDR)/$$SHOP_DB_NAME" drop -f
 
 add-demo-data:
-	@mysql -uroot -pqwer shop < ./test/demo-data.sql
+	@echo "Adding demo data"
+	@mysql -u$$SHOP_DB_USER -p$$SHOP_DB_PASS $$SHOP_DB_NAME < ./test/demo-data.sql
 
 clean:
-	@rm -r ./bin
+	rm -r ./bin
 
 # set-env
 # set -a && . ./.env && set +a
